@@ -1,21 +1,38 @@
 
+class InputNeuron
+
+  attr_accessor :input
+  attr_accessor :connected_output_neurons
+
+  def initialize
+    @input = nil
+    @connected_output_neurons=[]
+  end
+
+  def output
+    @input
+  end
+end
+
 class Neuron
   attr_accessor :inputs, :weights, :error
+  attr_accessor :connected_output_neurons
 
   def initialize(weights=[])
     @inputs = []
     @output = nil
+    @connected_output_neurons=[]
     @weights = weights
     @error = nil
   end
 
   def output
-    if @output.nil?
+    #if @output.nil?
       weighted_inputs = []
-      @inputs.each_with_index {|v,i| weighted_inputs << v*@weights[i]}
+      @inputs.each_with_index {|n,i| weighted_inputs << n.output*@weights[i]}
       sum = weighted_inputs.inject(0, :+)
       @output = 1.0 / (1 + Math.exp(-sum))
-    end
+    #end
     @output
   end
 
@@ -29,11 +46,34 @@ class Neuron
     @weights = weights
   end
 
+  def weighted_error(input_neuron)
+    index = @inputs.index(input_neuron)
+    @error * weights[index]
+  end
+
+end
+
+class Layer
+
+  attr_accessor :name
+  attr_reader :neurons
+
+  def initialize(name, neuron_count, neuron_class)
+    @neurons = []
+    neuron_count.times do
+      @neurons << neuron_class.new
+    end
+  end
+
+  def neuron_count
+    @neurons.count
+  end
 end
 
 class NeuralNetwork
 
-  attr_reader :hidden_neurons, :output_neurons
+  attr_reader :hidden_layers
+  attr_reader :output_layer
 
   def self.build(hidden_neurons_weights, output_neuron_weights)
     nn = self.new(hidden_neurons_weights[0].count, hidden_neurons_weights.count, output_neuron_weights.count)
@@ -46,8 +86,40 @@ class NeuralNetwork
     nn
   end
 
-  def initialize(input_count, hidden_neuron_count, output_neuron_count)
-    build_nn(input_count, hidden_neuron_count, output_neuron_count)
+  def initialize(input_count=nil, hidden_neuron_count=nil, output_neuron_count=nil)
+    @input_layer = nil
+    @hidden_layers = []
+    @output_layer = nil
+    unless input_count.nil?
+      build_nn(input_count, hidden_neuron_count, output_neuron_count)
+    end
+  end
+
+  def create_input_layer(neuron_count)
+    @input_layer = Layer.new('input', neuron_count, InputNeuron)
+  end
+
+  def create_hidden_layer(name, neuron_count)
+    layer = Layer.new(name, neuron_count, Neuron)
+    @hidden_layers << layer
+    layer
+  end
+
+  def create_output_layer(neuron_count)
+    @output_layer = Layer.new('output', neuron_count, Neuron)
+  end
+
+  def connect(from_layer, from_neuron_range, to_layer, to_neuron_range)
+    neurons_to_connect = to_layer.neurons[to_neuron_range]
+    from_layer.neurons[from_neuron_range].each do |neuron|
+      neurons_to_connect.each do |neuron_to_connect|
+        neuron_to_connect.inputs << neuron
+        neuron.connected_output_neurons << neuron_to_connect
+      end
+    end
+    neurons_to_connect.each do |neuron|
+      neuron.weights = build_weights(neuron.inputs.count)
+    end
   end
 
   def print_hidden_neurons
@@ -74,64 +146,56 @@ class NeuralNetwork
 
 
   def evaluate(inputs)
-    hidden_neurons_outputs = []
-    @hidden_neurons.each do |hidden_neuron|
-      hidden_neuron.inputs = inputs
-      hidden_neurons_outputs << hidden_neuron.output
+    @input_layer.neurons.each_with_index do |n, i|
+      n.input = inputs[i]
     end
-
-    output_neurons_outputs = []
-    @output_neurons.each do |output_neuron|
-      output_neuron.inputs = hidden_neurons_outputs
-      output_neurons_outputs << output_neuron.output
-    end
-    output_neurons_outputs
+    @output_layer.neurons.map {|n| n.output}
   end
 
   def calc_output_errors(expected_outputs)
-    @output_neurons.each_with_index do |neuron, i|
+    @output_layer.neurons.each_with_index do |neuron, i|
       neuron.error =
         (expected_outputs[i] - neuron.output) *  neuron.output * (1 - neuron.output)
     end
   end
 
   def calc_hidden_layer_errors()
-    @hidden_neurons.each_with_index do |hidden_neuron, i|
-      weighted_errors = @output_neurons.map { |n| n.error*n.weights[i] }
-      sum = weighted_errors.inject(0, :+)
-      hout = hidden_neuron.output
-      hidden_neuron.error = hout * (1.0 - hout) * sum
+    @hidden_layers.reverse.each do |layer|
+      layer.neurons.each_with_index do |neuron, i|
+        weighted_errors = neuron.connected_output_neurons.map {|on| on.weighted_error(neuron)}
+
+        #weighted_errors = @output_neurons.map { |n| n.error*n.weights[i] }
+        sum = weighted_errors.inject(0, :+)
+        output = neuron.output
+        neuron.error = output * (1.0 - output) * sum
+      end
     end
   end
 
   def update_weights
-    update_neurons_weights(@hidden_neurons)
-    update_neurons_weights(@output_neurons)
+    @hidden_layers.reverse.each do |layer|
+      update_neurons_weights(layer.neurons)
+    end
+    update_neurons_weights(@output_layer.neurons)
   end
 
 private
 
   def update_neurons_weights(neurons)
     neurons.each do |n|
-      n.inputs.each_with_index do |input, i|
-        n.weights[i] = n.weights[i] + 0.3 * n.error * input
+      n.inputs.each_with_index do |input_neuron, i|
+        n.weights[i] = n.weights[i] + 0.3 * n.error * input_neuron.output
       end
     end
   end
 
 
   def build_nn(input_count, hidden_neuron_count, output_neuron_count)
-    hidden_neurons = []
-    output_neurons = []
-    hidden_neuron_count.times do
-      weights = build_weights(input_count)
-      hidden_neurons << Neuron.new(weights)
-    end
-    output_neuron_count.times do
-      output_neurons << Neuron.new(build_weights(hidden_neuron_count))
-    end
-    @hidden_neurons = hidden_neurons
-    @output_neurons = output_neurons
+    l = self.create_input_layer(input_count)
+    hl = self.create_hidden_layer('L1', hidden_neuron_count)
+    ol = self.create_output_layer(output_neuron_count)
+    self.connect(l, 0..-1, hl, 0..-1)
+    self.connect(hl, 0..-1, ol, 0..-1)
   end
 
   def build_weights(count)
@@ -167,7 +231,7 @@ training = []
   training << [v, e]
 end
 
-150.times do
+550.times do
   success = 0
   training.each do |v,e|
     output = nn.evaluate([v])[0]
@@ -178,9 +242,9 @@ end
     end
     #p "training: #{v}, expecting #{e}, got #{nn.evaluate([v])}"
 
-    nn.calc_output_errors([e])
-    nn.calc_hidden_layer_errors
-    nn.update_weights
+   nn.calc_output_errors([e])
+   nn.calc_hidden_layer_errors
+   nn.update_weights
 
   end
   p "#{success.to_f/training.count.to_f*100}"
