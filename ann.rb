@@ -27,13 +27,17 @@ class Neuron
   end
 
   def output
-    #if @output.nil?
+    if @output.nil?
       weighted_inputs = []
       @inputs.each_with_index {|n,i| weighted_inputs << n.output*@weights[i]}
       sum = weighted_inputs.inject(0, :+)
       @output = 1.0 / (1 + Math.exp(-sum))
-    #end
+    end
     @output
+  end
+
+  def reset
+    @output = nil
   end
 
   def inputs=(inputs)
@@ -120,6 +124,11 @@ class NeuralNetwork
     neurons_to_connect.each do |neuron|
       neuron.weights = build_weights(neuron.inputs.count)
     end
+  end
+
+  def reset
+    @hidden_layers.map {|l| l.neurons.map {|n| n.reset } }
+    @output_layer.neurons.map {|n| n.reset }
   end
 
   def print_hidden_neurons
@@ -245,6 +254,7 @@ end
    nn.calc_output_errors([e])
    nn.calc_hidden_layer_errors
    nn.update_weights
+   nn.reset
 
   end
   p "#{success.to_f/training.count.to_f*100}"
